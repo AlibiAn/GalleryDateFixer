@@ -59,6 +59,14 @@ class FilenameDateParserTest {
         assertEquals(1684080930000L, ms.epochMillis)
         assertFalse(ms.dateOnly)
         assertEquals(1684080930000L, parser.parse("received_1684080930.jpeg")!!.epochMillis)
+        assertEquals(1684080930000L, parser.parse("1684080930.jpg")!!.epochMillis)
+    }
+
+    @Test fun randomIdsAreNotTimestamps() {
+        assertNull(parser.parse("Snapchat-1684080930.jpg"))
+        assertNull(parser.parse("Snapchat-1684080930123.jpg"))
+        assertNull(parser.parse("document_1684080930.jpg"))
+        assertNull(parser.parse("1500x1684080930.jpg"))
     }
 
     @Test fun rejectsGarbage() {

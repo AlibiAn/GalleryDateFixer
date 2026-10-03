@@ -6,7 +6,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,9 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -50,13 +46,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -64,12 +59,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alibian.gallerydatefixer.MainViewModel
-import com.alibian.gallerydatefixer.ResultFilter
 import com.alibian.gallerydatefixer.Screen
 import com.alibian.gallerydatefixer.UiState
 import com.alibian.gallerydatefixer.core.FixReport
-import com.alibian.gallerydatefixer.core.ItemStatus
-import com.alibian.gallerydatefixer.core.MediaItem
 import com.alibian.gallerydatefixer.core.ScanOptions
 import com.alibian.gallerydatefixer.core.Storage
 import java.io.File
@@ -77,8 +69,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private val DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm:ss")
-private fun formatDate(millis: Long): String =
+internal val DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm:ss")
+internal fun formatDate(millis: Long): String =
     Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DATE_FORMAT)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,11 +111,7 @@ fun App(viewModel: MainViewModel) {
                     onOptions = viewModel::setOptions,
                     onScan = viewModel::scan,
                 )
-                state.screen == Screen.RESULTS -> ResultsScreen(
-                    state = state,
-                    onFilter = viewModel::setFilter,
-                    onFix = viewModel::fix,
-                )
+                state.screen == Screen.RESULTS -> ResultsScreen(state, viewModel)
                 state.screen == Screen.DONE -> DoneScreen(state.report, onDone = viewModel::back)
             }
         }
@@ -354,103 +342,6 @@ private fun FolderPickerDialog(initial: File?, onDismiss: () -> Unit, onPick: (F
 }
 
 @Composable
-private fun ResultsScreen(state: UiState, onFilter: (ResultFilter) -> Unit, onFix: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                "${state.items.size} files found in ${state.folder?.name.orEmpty()}",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ResultFilter.entries.forEach { f ->
-                    val count = when (f) {
-                        ResultFilter.NEEDS_FIX -> state.needsFix
-                        ResultFilter.OK -> state.alreadyOk
-                        ResultFilter.NO_DATE -> state.noDate
-                        ResultFilter.ALL -> state.items.size
-                    }
-                    FilterChip(selected = state.filter == f, onClick = { onFilter(f) }, label = { Text("${f.label} ($count)") })
-                }
-            }
-        }
-        HorizontalDivider()
-
-        val visible = state.visibleItems
-        if (visible.isEmpty()) {
-            Column(Modifier.weight(1f).fillMaxWidth().padding(24.dp)) {
-                Text(
-                    when (state.filter) {
-                        ResultFilter.NEEDS_FIX -> "Nothing to fix – all dates are already correct."
-                        else -> "No files in this list."
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
-                items(visible, key = { it.path }) { item ->
-                    MediaRow(item)
-                    HorizontalDivider()
-                }
-            }
-        }
-
-        Surface(tonalElevation = 3.dp) {
-            Button(
-                onClick = onFix,
-                enabled = state.needsFix > 0 && !state.busy,
-                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).height(52.dp),
-            ) { Text(if (state.needsFix > 0) "Fix ${state.needsFix} files" else "Nothing to fix") }
-        }
-    }
-}
-
-@Composable
-private fun MediaRow(item: MediaItem) {
-    ListItem(
-        leadingContent = {
-            Icon(
-                if (item.isVideo) Icons.Filled.PlayArrow else Icons.Filled.DateRange,
-                contentDescription = if (item.isVideo) "Video" else "Photo",
-            )
-        },
-        headlineContent = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
-            Column {
-                if (item.relativeFolder.isNotEmpty()) {
-                    Text(item.relativeFolder, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Text("Now:  ${formatDate(item.currentModified)}", style = MaterialTheme.typography.bodySmall)
-                when (item.status) {
-                    ItemStatus.NO_DATE -> Text(
-                        "No date found in metadata or file name",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    else -> {
-                        val extra = if (item.needsExif) " · writes EXIF" else ""
-                        Text(
-                            "New: ${formatDate(item.targetDate!!)}  (${item.source.label}$extra)",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = if (item.status == ItemStatus.NEEDS_FIX) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (item.status == ItemStatus.NEEDS_FIX) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        },
-        trailingContent = {
-            when (item.status) {
-                ItemStatus.OK -> Icon(Icons.Filled.CheckCircle, contentDescription = "Correct", tint = MaterialTheme.colorScheme.primary)
-                ItemStatus.NO_DATE -> Icon(Icons.Filled.Warning, contentDescription = "No date", tint = MaterialTheme.colorScheme.error)
-                ItemStatus.NEEDS_FIX -> {}
-            }
-        },
-    )
-}
-
-@Composable
 private fun DoneScreen(report: FixReport?, onDone: () -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -469,6 +360,16 @@ private fun DoneScreen(report: FixReport?, onDone: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (report.warnings.isNotEmpty()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${report.warnings.size} warnings (modified date was still fixed)", style = MaterialTheme.typography.titleSmall)
+                    report.warnings.take(50).forEach { (name, reason) ->
+                        Text("• $name: $reason", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         if (report.failures.isNotEmpty()) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

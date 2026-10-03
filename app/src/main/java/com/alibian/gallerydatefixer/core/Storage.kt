@@ -44,3 +44,25 @@ object Storage {
             .orEmpty()
             .sortedBy { it.name.lowercase() }
 }
+
+/** Finds the MediaStore content URI for a file so it can be opened in the Gallery / a video player. */
+fun mediaStoreUri(context: Context, path: String, isVideo: Boolean): android.net.Uri? {
+    val collection = if (isVideo) {
+        android.provider.MediaStore.Video.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL)
+    } else {
+        android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL)
+    }
+    return try {
+        context.contentResolver.query(
+            collection,
+            arrayOf(android.provider.MediaStore.MediaColumns._ID),
+            "${android.provider.MediaStore.MediaColumns.DATA} = ?",
+            arrayOf(path),
+            null,
+        )?.use { c ->
+            if (c.moveToFirst()) android.content.ContentUris.withAppendedId(collection, c.getLong(0)) else null
+        }
+    } catch (e: Exception) {
+        null
+    }
+}

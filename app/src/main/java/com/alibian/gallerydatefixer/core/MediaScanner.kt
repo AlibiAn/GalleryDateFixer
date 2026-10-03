@@ -5,14 +5,13 @@ import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
-import java.time.Instant
 import java.time.ZoneId
-import kotlin.math.abs
 
 /** Walks a folder, and works out for every photo / video which date it should carry. */
 class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
 
     private val filenameParser = FilenameDateParser(zone)
+    private val chooser = DateChooser(zone)
 
     suspend fun scan(
         root: File,
@@ -26,8 +25,7 @@ class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
             result += analyze(root, file, options)
             if (index % 10 == 0 || index == files.lastIndex) onProgress(index + 1, files.size)
         }
-        // Oldest first: the order the gallery should show them in.
-        return result.sortedWith(compareBy<MediaItem> { it.targetDate ?: Long.MAX_VALUE }.thenBy { it.name })
+        return sortByTarget(result)
     }
 
     private fun listMediaFiles(root: File, options: ScanOptions): List<File> {
@@ -49,50 +47,27 @@ class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
         return out
     }
 
-    fun analyze(root: File, file: File, options: ScanOptions): MediaItem {
+    private fun analyze(root: File, file: File, options: ScanOptions): MediaItem {
         val isVideo = MediaTypes.isVideo(file)
         val current = file.lastModified()
         val embedded = if (isVideo) readVideoDate(file) else readExifDate(file)
         val fromName = filenameParser.parse(file.name)
+        val choice = chooser.choose(isVideo, current, embedded, fromName, options.preferFilename)
 
-        val nameMillis: Long? = fromName?.let { parsed ->
-            when {
-                !parsed.dateOnly -> parsed.epochMillis
-                // Only the day is known: keep a more precise time when it agrees on the day.
-                embedded != null && sameDay(embedded, parsed.epochMillis) -> embedded
-                sameDay(current, parsed.epochMillis) -> current
-                else -> parsed.epochMillis
-            }
-        }
-
-        val (target, source) = when {
-            options.preferFilename && nameMillis != null -> nameMillis to DateSource.FILENAME
-            embedded != null -> embedded to (if (isVideo) DateSource.VIDEO_METADATA else DateSource.EXIF)
-            nameMillis != null -> nameMillis to DateSource.FILENAME
-            else -> null to DateSource.NONE
-        }
-
-        val needsTimestamp = target != null && abs(current - target) >= TOLERANCE_MILLIS
-        val needsExif = target != null && options.writeExif && MediaTypes.canWriteExif(file) &&
-            (embedded == null || abs(embedded - target) >= EXIF_TOLERANCE_MILLIS)
-
-        val relative = file.parentFile?.relativeToOrNull(root)?.path.orEmpty()
         return MediaItem(
             path = file.absolutePath,
             name = file.name,
-            relativeFolder = relative,
+            relativeFolder = file.parentFile?.relativeToOrNull(root)?.path.orEmpty(),
             isVideo = isVideo,
             currentModified = current,
-            targetDate = target,
-            source = source,
             embeddedDate = embedded,
-            needsTimestamp = needsTimestamp,
-            needsExif = needsExif,
+            nameDate = choice.nameDate,
+            nameDateIsDayOnly = fromName?.dateOnly == true,
+            canWriteExif = MediaTypes.canWriteExif(file),
+            writeExifEnabled = options.writeExif,
+            source = choice.source,
         )
     }
-
-    private fun sameDay(a: Long, b: Long): Boolean =
-        Instant.ofEpochMilli(a).atZone(zone).toLocalDate() == Instant.ofEpochMilli(b).atZone(zone).toLocalDate()
 
     private fun readExifDate(file: File): Long? = try {
         val exif = ExifInterface(file)
@@ -127,9 +102,9 @@ class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
     }
 
     companion object {
-        /** Differences below this are treated as "already correct" (file systems round times). */
-        const val TOLERANCE_MILLIS = 2_000L
-        private const val EXIF_TOLERANCE_MILLIS = 60_000L
+        /** Oldest first: the order the gallery should show them in. */
+        fun sortByTarget(items: List<MediaItem>): List<MediaItem> =
+            items.sortedWith(compareBy<MediaItem> { it.targetDate ?: Long.MAX_VALUE }.thenBy { it.name })
     }
 }
 

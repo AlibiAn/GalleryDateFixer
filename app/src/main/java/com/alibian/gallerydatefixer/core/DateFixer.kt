@@ -27,22 +27,28 @@ class DateFixer(private val context: Context, private val zone: ZoneId = ZoneId.
         items: List<MediaItem>,
         onProgress: (done: Int, total: Int, phase: String) -> Unit,
     ): FixReport {
-        val todo = items.filter { it.status == ItemStatus.NEEDS_FIX }
+        val todo = items.filter { it.selected && it.status == ItemStatus.NEEDS_FIX }
         val failures = mutableListOf<Pair<String, String>>()
+        val warnings = mutableListOf<Pair<String, String>>()
         val changed = mutableListOf<MediaItem>()
-        var exifWritten = 0
+        val exifOk = HashSet<String>()
 
         todo.forEachIndexed { index, item ->
             currentCoroutineContext().ensureActive()
             val file = File(item.path)
             val target = item.targetDate!!
-            try {
-                if (item.needsExif) {
+            if (item.needsExif) {
+                // A failed EXIF write must not stop the modified date from being fixed.
+                try {
                     writeExifDate(file, target)
-                    exifWritten++
+                    exifOk += item.path
+                } catch (e: Exception) {
+                    warnings += item.name to "EXIF not written: ${e.message ?: e.javaClass.simpleName}"
                 }
+            }
+            try {
                 // Always (re)set the timestamp: writing EXIF rewrites the file and bumps it to "now".
-                if (!file.setLastModified(target) || abs(file.lastModified() - target) >= MediaScanner.TOLERANCE_MILLIS) {
+                if (!file.setLastModified(target) || abs(file.lastModified() - target) >= MediaItem.TOLERANCE_MILLIS) {
                     failures += item.name to "Android refused to change the modified date"
                 } else {
                     changed += item
@@ -58,8 +64,9 @@ class DateFixer(private val context: Context, private val zone: ZoneId = ZoneId.
         return FixReport(
             attempted = todo.size,
             fixed = changed.size,
-            exifWritten = exifWritten,
+            exifWritten = exifOk.size,
             failures = failures,
+            warnings = warnings,
         )
     }
 
@@ -102,22 +109,26 @@ class DateFixer(private val context: Context, private val zone: ZoneId = ZoneId.
     }
 
     /**
-     * Files without an embedded date (videos without metadata, GIFs, HEIC without EXIF...) get no
-     * "date taken" from the scanner. Try to set it to the target date so date-taken sorting works too.
-     * This is best effort: on some Android builds MediaStore ignores or rejects it, and the Gallery
-     * then falls back to the modified date we've just set.
+     * The media scanner only sets "date taken" from EXIF / video metadata, so for files without one
+     * (or where the user chose the file-name date) it would keep a stale value. Set it explicitly so
+     * date-taken sorting matches. Best effort: if MediaStore rejects it, the Gallery falls back to
+     * the modified date we've just set.
      */
     private fun updateDateTaken(item: MediaItem) {
-        if (item.needsExif || item.embeddedDate != null) return
         val target = item.targetDate ?: return
         try {
-            val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            val collection = if (item.isVideo) {
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            } else {
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            }
             val values = ContentValues().apply { put(MediaStore.MediaColumns.DATE_TAKEN, target) }
             context.contentResolver.update(
                 collection,
                 values,
-                "${MediaStore.MediaColumns.DATA} = ?",
-                arrayOf(item.path),
+                "${MediaStore.MediaColumns.DATA} = ? AND (${MediaStore.MediaColumns.DATE_TAKEN} IS NULL OR " +
+                    "${MediaStore.MediaColumns.DATE_TAKEN} != ?)",
+                arrayOf(item.path, target.toString()),
             )
         } catch (_: Exception) {
         }

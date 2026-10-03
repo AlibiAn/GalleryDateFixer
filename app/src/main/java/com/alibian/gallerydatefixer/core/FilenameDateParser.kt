@@ -56,11 +56,16 @@ class FilenameDateParser(
     }
 
     private fun parseTimestamp(name: String): FilenameDate? {
+        // Many apps name files after random IDs (e.g. Snapchat-1234567890.jpg); only trust numbers
+        // that apps are known to use as timestamps.
+        if (NOT_TIMESTAMP_PREFIX.containsMatchIn(name)) return null
         for (m in TIMESTAMP.findAll(name)) {
             val digits = m.groupValues[1]
-            val epoch = when (digits.length) {
-                13 -> digits.toLong()
-                10 -> digits.toLong() * 1000
+            val prefix = name.substring(0, m.range.first)
+            val epoch = when {
+                digits.length == 13 -> digits.toLong()
+                // Seconds are only trusted with a known prefix, or when the name is just the number.
+                digits.length == 10 && (prefix.isEmpty() || TIMESTAMP_PREFIX.matches(prefix)) -> digits.toLong() * 1000
                 else -> continue
             }
             // Timestamps are only trusted from 2005 on, to avoid matching random numbers.
@@ -126,6 +131,10 @@ class FilenameDateParser(
         )
 
         private val TIMESTAMP = Regex("""(?<!\d)(\d{13}|\d{10})(?!\d)""")
+        private val TIMESTAMP_PREFIX = Regex(
+            """(?i).*(received|fb_img|img|image|photo|video|vid|screenshot|mmexport|wp|pic|picture)[_\-]?""",
+        )
+        private val NOT_TIMESTAMP_PREFIX = Regex("""(?i)^snapchat""")
         private val WA_SEQUENCE = Regex("""WA(\d{1,5})""", RegexOption.IGNORE_CASE)
 
         private const val ONE_DAY_MILLIS = 24L * 60 * 60 * 1000

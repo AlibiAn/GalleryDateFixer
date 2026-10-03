@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.alibian.gallerydatefixer.core.DateFixer
+import com.alibian.gallerydatefixer.core.DateSource
 import com.alibian.gallerydatefixer.core.FixReport
 import com.alibian.gallerydatefixer.core.ItemStatus
 import com.alibian.gallerydatefixer.core.MediaItem
@@ -37,9 +38,19 @@ data class UiState(
     val progress: Progress? = null,
     val report: FixReport? = null,
     val error: String? = null,
+    /** How many files share each target date (in whole seconds) – used to flag suspicious duplicates. */
+    val sameDateCounts: Map<Long, Int> = emptyMap(),
+    /** File opened in the large preview, if any. */
+    val detailPath: String? = null,
 ) {
     val busy get() = progress != null
     val needsFix get() = items.count { it.status == ItemStatus.NEEDS_FIX }
+    val toFix get() = items.count { it.selected && it.status == ItemStatus.NEEDS_FIX }
+    val detailItem: MediaItem? get() = detailPath?.let { p -> items.firstOrNull { it.path == p } }
+
+    /** Number of *other* files with exactly the same new date. */
+    fun sameDateOthers(item: MediaItem): Int =
+        item.targetDate?.let { (sameDateCounts[it / 1000] ?: 1) - 1 } ?: 0
     val alreadyOk get() = items.count { it.status == ItemStatus.OK }
     val noDate get() = items.count { it.status == ItemStatus.NO_DATE }
     val visibleItems: List<MediaItem>
@@ -106,7 +117,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 val filter = if (items.any { it.status == ItemStatus.NEEDS_FIX }) ResultFilter.NEEDS_FIX else ResultFilter.ALL
-                _state.update { it.copy(items = items, filter = filter, screen = Screen.RESULTS, progress = null) }
+                _state.update {
+                    it.copy(
+                        items = items,
+                        sameDateCounts = sameDateCounts(items),
+                        filter = filter,
+                        screen = Screen.RESULTS,
+                        progress = null,
+                    )
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _state.update { it.copy(progress = null) }
                 throw e
@@ -119,7 +138,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun fix() {
         val items = _state.value.items
         job?.cancel()
-        _state.update { it.copy(progress = Progress("Updating files", 0, it.needsFix)) }
+        _state.update { it.copy(progress = Progress("Updating files", 0, it.toFix), detailPath = null) }
         job = viewModelScope.launch {
             try {
                 val report = withContext(Dispatchers.IO) {
@@ -137,6 +156,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun toggleSelected(path: String) = updateItem(path) { it.copy(selected = !it.selected) }
+
+    /** Tick / untick every file in the "To fix" list. */
+    fun selectAll(selected: Boolean) = _state.update { st ->
+        st.copy(items = st.items.map { if (it.status == ItemStatus.NEEDS_FIX) it.copy(selected = selected) else it })
+    }
+
+    /** Lets the user pick the EXIF/video date or the file-name date for one file. */
+    fun setSource(path: String, source: DateSource) = updateItem(path) {
+        if (source in it.availableSources) it.copy(source = source, selected = true) else it
+    }
+
+    fun showDetail(path: String?) = _state.update { it.copy(detailPath = path) }
+
+    private fun updateItem(path: String, change: (MediaItem) -> MediaItem) = _state.update { st ->
+        val items = st.items.map { if (it.path == path) change(it) else it }
+        st.copy(items = items, sameDateCounts = sameDateCounts(items))
+    }
+
+    private fun sameDateCounts(items: List<MediaItem>): Map<Long, Int> =
+        items.mapNotNull { it.targetDate?.div(1000) }.groupingBy { it }.eachCount()
+
     fun cancel() {
         job?.cancel()
         _state.update { it.copy(progress = null) }
@@ -146,8 +187,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.busy) return
         _state.update {
             when (it.screen) {
-                Screen.DONE -> it.copy(screen = Screen.HOME, items = emptyList(), report = null)
-                Screen.RESULTS -> it.copy(screen = Screen.HOME, items = emptyList())
+                Screen.DONE -> it.copy(screen = Screen.HOME, items = emptyList(), sameDateCounts = emptyMap(), report = null)
+                Screen.RESULTS -> if (it.detailPath != null) it.copy(detailPath = null)
+                else it.copy(screen = Screen.HOME, items = emptyList(), sameDateCounts = emptyMap())
                 Screen.HOME -> it
             }
         }

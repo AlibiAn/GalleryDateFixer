@@ -26,8 +26,23 @@ For every image/video in the folder (optionally including subfolders):
 
 You can switch the priority with **Prefer date from file name**.
 
-You get a **preview** first (current date → new date, and where it came from). Nothing is
-changed until you tap **Fix**.
+Videos: when a full camera file name (`VID_20230514_181530.mp4`) is within a day of the video's
+metadata date, the file name wins – many phones store local time in the (UTC) video date, which
+shifts it by your time-zone offset, and some record the end of the clip.
+Long numbers are only treated as Unix timestamps with known prefixes (`FB_IMG_`, `received_`, …),
+so random IDs such as `Snapchat-1234567890.jpg` no longer produce made-up dates.
+
+## Preview
+
+You get a **preview** first, with a thumbnail of every photo/video, the current date → new date,
+and where it came from. Hints flag files worth checking:
+- *Date in file and file name differ* – the two candidates are more than an hour apart;
+- *Same new date as N other files* – possible duplicate dates;
+- *Only the day is known* – WhatsApp-style names, time is estimated.
+
+Tap a file to open a large preview with both candidate dates; pick the right one, untick the file
+to leave it alone, open it in the Gallery / play the video, and step through files with ‹ ›.
+Nothing is changed until you tap **Fix**, and only ticked files are changed.
 
 ## What "Fix" does
 
@@ -65,11 +80,15 @@ Requirements: Android 11 (API 30) or newer; targets Android 16 (API 36).
 app/src/main/java/com/alibian/gallerydatefixer/
   core/FilenameDateParser.kt  – date patterns in file names (pure Kotlin, unit tested)
   core/MetadataDates.kt       – EXIF / video date parsing & formatting (unit tested)
-  core/MediaScanner.kt        – walks a folder, decides each file's target date
+  core/DateChooser.kt         – picks EXIF/video vs file-name date (unit tested)
+  core/MediaItem.kt           – per-file candidates, status, selection
+  core/MediaScanner.kt        – walks a folder, reads EXIF / video dates
   core/DateFixer.kt           – writes EXIF, sets modified date, refreshes MediaStore
   core/Storage.kt             – storage roots, folder shortcuts, permission check
   MainViewModel.kt            – UI state, scan / fix jobs
-  ui/Screens.kt               – Jetpack Compose UI (folder browser, preview, results)
+  ui/Screens.kt               – Jetpack Compose UI (permission, home, folder browser, done)
+  ui/Results.kt               – preview list with thumbnails, per-file detail view
+  ui/Thumbnails.kt            – cached thumbnail loading
 ```
 
 Run the unit tests with `./gradlew test`.

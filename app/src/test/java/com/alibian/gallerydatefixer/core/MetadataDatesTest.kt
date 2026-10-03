@@ -31,6 +31,11 @@ class MetadataDatesTest {
         assertEquals(expected, MetadataDates.parseVideo("20230514T161530.000Z", zone))
     }
 
+    @Test fun videoIsoFormat() {
+        val expected = ZonedDateTime.parse("2023-05-14T16:15:30.123Z").toInstant().toEpochMilli()
+        assertEquals(expected, MetadataDates.parseVideo("2023-05-14T16:15:30.123456Z", zone))
+    }
+
     @Test fun videoUnsetDateIsRejected() {
         assertNull(MetadataDates.parseVideo("19040101T000000.000Z", zone))
     }

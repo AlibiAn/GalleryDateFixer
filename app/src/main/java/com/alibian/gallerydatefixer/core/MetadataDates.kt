@@ -14,7 +14,8 @@ object MetadataDates {
     private val EXIF_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss")
     private val EXIF_DATE = Regex("""^\s*(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})""")
     private val EXIF_OFFSET = Regex("""^\s*([+\-])(\d{2}):(\d{2})\s*$""")
-    private val VIDEO_DATE = Regex("""^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(?:\.(\d{1,3}))?(Z)?""")
+    // "20230514T161530.000Z" (usual) or ISO "2023-05-14T16:15:30.000000Z" (some devices).
+    private val VIDEO_DATE = Regex("""^(\d{4})-?(\d{2})-?(\d{2})T(\d{2}):?(\d{2}):?(\d{2})(?:\.(\d{1,9}))?(Z)?""")
 
     /**
      * Parses an EXIF `DateTimeOriginal` value ("2020:01:01 12:34:56").
@@ -44,7 +45,7 @@ object MetadataDates {
         } catch (e: DateTimeException) {
             return null
         }
-        val millis = g[7].padEnd(3, '0').toIntOrNull() ?: 0
+        val millis = g[7].take(3).padEnd(3, '0').toIntOrNull() ?: 0
         // MP4/MOV creation times are UTC; the retriever appends "Z" in that case.
         val zoneToUse: ZoneId = if (g[8] == "Z") ZoneOffset.UTC else zone
         val epoch = ldt.atZone(zoneToUse).toInstant().toEpochMilli() + millis
