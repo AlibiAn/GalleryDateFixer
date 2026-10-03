@@ -9,14 +9,18 @@ import java.time.ZoneId
 /**
  * A date recovered from a file name.
  *
- * @param dateOnly true when the name only contained a day (e.g. WhatsApp's `IMG-20200101-WA0001.jpg`),
- *                 so [localDateTime] has a synthetic time of day.
+ * [Kind.DAY_ONLY] means the name only contained a day (e.g. WhatsApp's `IMG-20200101-WA0001.jpg`),
+ * so [localDateTime] has an estimated time of day.
  */
 data class FilenameDate(
     val localDateTime: LocalDateTime,
-    val dateOnly: Boolean,
+    val kind: Kind,
     val epochMillis: Long,
-)
+) {
+    enum class Kind { DATE_TIME, TIMESTAMP, DAY_ONLY }
+
+    val dateOnly: Boolean get() = kind == Kind.DAY_ONLY
+}
 
 /**
  * Extracts capture dates from common camera / messenger / screenshot file names, e.g.
@@ -27,7 +31,8 @@ data class FilenameDate(
  * - `Screenshot 2020-01-01 at 12.34.56.png` (macOS), `PHOTO-2020-01-01-12-34-56.jpg` (WhatsApp export)
  * - `signal-2020-01-01-123456.jpg`
  * - `IMG-20200101-WA0001.jpg` (WhatsApp, date only – the WA sequence number keeps the order inside a day)
- * - `FB_IMG_1577836800000.jpg`, `received_1577836800000.jpeg` (Unix timestamps in ms or s)
+ * - `FB_IMG_1577836800000.jpg`, `mmexport1577836800000.jpg`, `1577836800000.jpg` (Unix timestamps,
+ *   only with prefixes known to use them – other long numbers in names are usually random IDs)
  *
  * File-name times are interpreted in [zone] (the phone's time zone), which is what cameras use.
  */
@@ -37,7 +42,8 @@ class FilenameDateParser(
 ) {
 
     fun parse(fileName: String): FilenameDate? {
-        val name = fileName.substringBeforeLast('.')
+        // Hashes and UUIDs (common in downloaded / cached files) contain digit runs that can look like dates.
+        val name = HASH_LIKE.replace(fileName.substringBeforeLast('.'), "_")
         return parseDateTime(name) ?: parseTimestamp(name) ?: parseDateOnly(name)
     }
 
@@ -49,32 +55,27 @@ class FilenameDateParser(
                 val millis = g.getOrNull(7).orEmpty().take(3).padEnd(3, '0').ifEmpty { "000" }.toInt()
                 val withMillis = ldt.plusNanos(millis * 1_000_000L)
                 val epoch = withMillis.atZone(zone).toInstant().toEpochMilli()
-                if (isPlausible(epoch)) return FilenameDate(withMillis, dateOnly = false, epochMillis = epoch)
+                if (isPlausible(epoch)) return FilenameDate(withMillis, FilenameDate.Kind.DATE_TIME, epoch)
             }
         }
         return null
     }
 
     private fun parseTimestamp(name: String): FilenameDate? {
-        // Many apps name files after random IDs (e.g. Snapchat-1234567890.jpg); only trust numbers
-        // that apps are known to use as timestamps.
-        if (NOT_TIMESTAMP_PREFIX.containsMatchIn(name)) return null
-        for (m in TIMESTAMP.findAll(name)) {
-            val digits = m.groupValues[1]
-            val prefix = name.substring(0, m.range.first)
-            val epoch = when {
-                digits.length == 13 -> digits.toLong()
-                // Seconds are only trusted with a known prefix, or when the name is just the number.
-                digits.length == 10 && (prefix.isEmpty() || TIMESTAMP_PREFIX.matches(prefix)) -> digits.toLong() * 1000
-                else -> continue
-            }
-            // Timestamps are only trusted from 2005 on, to avoid matching random numbers.
-            if (epoch >= MIN_TIMESTAMP_MILLIS && isPlausible(epoch)) {
-                val ldt = LocalDateTime.ofInstant(Instant.ofEpochMilli(epoch), zone)
-                return FilenameDate(ldt, dateOnly = false, epochMillis = epoch)
-            }
+        // Most long numbers in file names are random IDs (Messenger_creation_…, Snapchat-…, picker
+        // copies like 1000012345.jpg), which as timestamps land on bogus dates such as 2006 or 2009.
+        // Only trust numbers in a position where apps are known to put a timestamp.
+        val m = TIMESTAMP.matchEntire(name) ?: return null
+        val digits = m.groupValues[2]
+        val prefix = m.groupValues[1]
+        val epoch = when {
+            digits.length == 13 && (prefix.isEmpty() || MS_TIMESTAMP_PREFIX.matches(prefix)) -> digits.toLong()
+            digits.length == 10 && S_TIMESTAMP_PREFIX.matches(prefix) -> digits.toLong() * 1000
+            else -> return null
         }
-        return null
+        if (epoch < MIN_TIMESTAMP_MILLIS || !isPlausible(epoch)) return null
+        val ldt = LocalDateTime.ofInstant(Instant.ofEpochMilli(epoch), zone)
+        return FilenameDate(ldt, FilenameDate.Kind.TIMESTAMP, epoch)
     }
 
     private fun parseDateOnly(name: String): FilenameDate? {
@@ -92,7 +93,7 @@ class FilenameDateParser(
                 val sequence = WA_SEQUENCE.find(name)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
                 val ldt = date.atTime(12, 0).plusSeconds(sequence.coerceAtMost(MAX_SEQUENCE_SECONDS))
                 val epoch = ldt.atZone(zone).toInstant().toEpochMilli()
-                if (isPlausible(epoch)) return FilenameDate(ldt, dateOnly = true, epochMillis = epoch)
+                if (isPlausible(epoch)) return FilenameDate(ldt, FilenameDate.Kind.DAY_ONLY, epoch)
             }
         }
         return null
@@ -125,21 +126,25 @@ class FilenameDateParser(
             Regex("""(?<!\d)$YEAR-$MONTH-$DAY[ _\-T]$HOUR$MIN$SEC(\d{1,3})?(?!\d)"""),
         )
 
+        // A bare day must stand on its own (IMG-20230514-WA0007, 2023-05-14 trip), not be glued to
+        // letters or digits, where 8 digits are far more likely to be part of an ID.
         private val DATE_ONLY_PATTERNS = listOf(
-            Regex("""(?<!\d)$YEAR$MONTH$DAY(?!\d)"""),
-            Regex("""(?<!\d)$YEAR-$MONTH-$DAY(?!\d)"""),
+            Regex("""(?<![A-Za-z0-9])$YEAR$MONTH$DAY(?![A-Za-z0-9])"""),
+            Regex("""(?<![A-Za-z0-9])$YEAR-$MONTH-$DAY(?![A-Za-z0-9])"""),
         )
 
-        private val TIMESTAMP = Regex("""(?<!\d)(\d{13}|\d{10})(?!\d)""")
-        private val TIMESTAMP_PREFIX = Regex(
-            """(?i).*(received|fb_img|img|image|photo|video|vid|screenshot|mmexport|wp|pic|picture)[_\-]?""",
+        /** Whole name = optional known prefix + number + optional "(1)" / "_1" / "-edited" style suffix. */
+        private val TIMESTAMP = Regex("""(?i)^([a-z_\-]*?)(\d{13}|\d{10})(?:\s*\(\d{1,3}\)|[_\-][a-z0-9]{1,8})?$""")
+        private val MS_TIMESTAMP_PREFIX = Regex("""(?i)(fb_img_|received_|mmexport|wp_|screenshot_|img_|image_|photo_|video_|vid_)""")
+        private val S_TIMESTAMP_PREFIX = Regex("""(?i)(fb_img_|received_|mmexport|screenshot_)""")
+        private val HASH_LIKE = Regex(
+            """(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]{16,})(?=[0-9a-f]*?[a-f])(?=[0-9a-f]*?\d)[0-9a-f]{16,}""",
         )
-        private val NOT_TIMESTAMP_PREFIX = Regex("""(?i)^snapchat""")
         private val WA_SEQUENCE = Regex("""WA(\d{1,5})""", RegexOption.IGNORE_CASE)
 
         private const val ONE_DAY_MILLIS = 24L * 60 * 60 * 1000
         private const val MAX_SEQUENCE_SECONDS = 11L * 60 * 60 // stay within the same day
         private const val MIN_PLAUSIBLE_MILLIS = 631_152_000_000L // 1990-01-01
-        private const val MIN_TIMESTAMP_MILLIS = 1_104_537_600_000L // 2005-01-01
+        private const val MIN_TIMESTAMP_MILLIS = 1_262_304_000_000L // 2010-01-01
     }
 }

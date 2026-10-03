@@ -78,6 +78,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 includeVideos = prefs.getBoolean(KEY_VIDEOS, true),
                 preferFilename = prefs.getBoolean(KEY_PREFER_NAME, false),
                 writeExif = prefs.getBoolean(KEY_WRITE_EXIF, true),
+                minYear = prefs.getInt(KEY_MIN_YEAR, 0),
             ),
         ),
     )
@@ -96,6 +97,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putBoolean(KEY_VIDEOS, options.includeVideos)
             .putBoolean(KEY_PREFER_NAME, options.preferFilename)
             .putBoolean(KEY_WRITE_EXIF, options.writeExif)
+            .putInt(KEY_MIN_YEAR, options.minYear)
             .apply()
         _state.update { it.copy(options = options) }
     }
@@ -201,5 +203,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         const val KEY_VIDEOS = "videos"
         const val KEY_PREFER_NAME = "prefer_name"
         const val KEY_WRITE_EXIF = "write_exif"
+        const val KEY_MIN_YEAR = "min_year"
     }
 }

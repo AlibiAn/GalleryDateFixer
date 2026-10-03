@@ -65,6 +65,7 @@ import com.alibian.gallerydatefixer.MainViewModel
 import com.alibian.gallerydatefixer.ResultFilter
 import com.alibian.gallerydatefixer.UiState
 import com.alibian.gallerydatefixer.core.DateSource
+import com.alibian.gallerydatefixer.core.FilenameDate
 import com.alibian.gallerydatefixer.core.ItemStatus
 import com.alibian.gallerydatefixer.core.MediaItem
 import com.alibian.gallerydatefixer.core.mediaStoreUri
@@ -178,7 +179,7 @@ private fun MediaRow(item: MediaItem, sameDateOthers: Int, onClick: () -> Unit, 
                 Text("No date found in metadata or file name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             } else {
                 Text(
-                    "New: ${formatDate(target)} · ${item.source.label}" + if (item.needsExif) " · writes EXIF" else "",
+                    "New: ${formatDate(target)} · ${item.sourceLabel}" + if (item.needsExif) " · writes EXIF" else "",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = if (fix) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (fix && item.selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -204,6 +205,16 @@ private fun Warnings(item: MediaItem, sameDateOthers: Int) {
         item.targetDate != item.embeddedDate
     ) {
         Text("ⓘ Only the day is known; time is estimated", style = style, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    item.ignoredDates.forEach { (label, date) ->
+        Text(
+            "ⓘ Ignored $label date ${formatDate(date)} (before your minimum year)",
+            style = style,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (item.source == DateSource.FILENAME && item.nameKind == FilenameDate.Kind.TIMESTAMP) {
+        Text("ⓘ Date comes from a number in the file name – check it looks right", style = style, color = color)
     }
     if (sameDateOthers > 0) {
         Text("⚠ Same new date as $sameDateOthers other file${if (sameDateOthers == 1) "" else "s"}", style = style, color = color)
@@ -272,7 +283,7 @@ private fun DetailDialog(
                     onClick = { onSource(item.embeddedSource) },
                 )
                 SourceOption(
-                    title = "File name" + if (item.nameDateIsDayOnly) " (day only, time estimated)" else "",
+                    title = item.nameLabel,
                     value = item.nameDate?.let(::formatDate) ?: "No date in the file name",
                     selected = item.source == DateSource.FILENAME,
                     enabled = item.nameDate != null,

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +39,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -52,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -233,6 +236,7 @@ private fun HomeScreen(
                     "Use the file-name date even when the file contains its own date.",
                     options.preferFilename,
                 ) { onOptions(options.copy(preferFilename = it)) }
+                MinYearRow(options.minYear) { onOptions(options.copy(minYear = it)) }
             }
         }
 
@@ -268,6 +272,41 @@ private fun OptionRow(title: String, subtitle: String?, checked: Boolean, onChan
         supportingContent = subtitle?.let { text -> @Composable { Text(text) } },
         trailingContent = { Switch(checked = checked, onCheckedChange = onChange) },
         modifier = Modifier.clickable { onChange(!checked) },
+        colors = ListItemDefaults.colors(containerColor = CardDefaults.cardColors().containerColor),
+    )
+}
+
+@Composable
+private fun MinYearRow(minYear: Int, onChange: (Int) -> Unit) {
+    var text by remember { mutableStateOf(if (minYear > 0) minYear.toString() else "") }
+    val maxYear = remember { java.time.Year.now().value }
+    ListItem(
+        headlineContent = { Text("Ignore dates before year") },
+        supportingContent = {
+            Text(
+                "Dates older than this (from EXIF or file name) are treated as wrong. " +
+                    "Useful when all photos in the folder are recent. Leave empty for no limit.",
+            )
+        },
+        trailingContent = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { new ->
+                    val digits = new.filter(Char::isDigit).take(4)
+                    text = digits
+                    val year = digits.toIntOrNull()
+                    when {
+                        digits.isEmpty() -> onChange(0)
+                        year != null && digits.length == 4 && year in 1990..maxYear -> onChange(year)
+                    }
+                },
+                placeholder = { Text("none") },
+                singleLine = true,
+                isError = text.isNotEmpty() && (text.length != 4 || text.toInt() !in 1990..maxYear),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.width(96.dp),
+            )
+        },
         colors = ListItemDefaults.colors(containerColor = CardDefaults.cardColors().containerColor),
     )
 }

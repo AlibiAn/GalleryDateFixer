@@ -29,8 +29,15 @@ You can switch the priority with **Prefer date from file name**.
 Videos: when a full camera file name (`VID_20230514_181530.mp4`) is within a day of the video's
 metadata date, the file name wins – many phones store local time in the (UTC) video date, which
 shifts it by your time-zone offset, and some record the end of the clip.
-Long numbers are only treated as Unix timestamps with known prefixes (`FB_IMG_`, `received_`, …),
-so random IDs such as `Snapchat-1234567890.jpg` no longer produce made-up dates.
+Long numbers are only treated as Unix timestamps when the whole name is the number
+(`1684080930000.jpg`) or it follows a prefix known to use timestamps (`FB_IMG_`, `mmexport`,
+`received_`, …), and only from 2010 on. Random IDs such as `Messenger_creation_1157893422115.jpeg`,
+`image_1234567890.jpg` or `Snapchat-1234567890.jpg` used to be misread as 2006/2009 dates; they are
+now ignored, as are hashes/UUIDs and 8-digit days glued to other letters or digits.
+
+**Ignore dates before year** (home screen): any EXIF, video or file-name date older than this is
+treated as wrong – handy when everything in a folder is recent, e.g. downloaded pictures whose EXIF
+still carries the original 2009 camera date. Ignored dates are listed in the preview.
 
 ## Preview
 

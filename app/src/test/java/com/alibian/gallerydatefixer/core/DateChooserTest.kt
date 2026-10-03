@@ -66,7 +66,7 @@ class DateChooserTest {
         val name = millis(2023, 5, 20, 9, 0, 0)
         val item = MediaItem(
             path = "/x/a.jpg", name = "a.jpg", relativeFolder = "", isVideo = false,
-            currentModified = exif, embeddedDate = exif, nameDate = name, nameDateIsDayOnly = false,
+            currentModified = exif, embeddedDate = exif, nameDate = name, nameKind = FilenameDate.Kind.DATE_TIME,
             canWriteExif = true, writeExifEnabled = true, source = DateSource.EXIF,
         )
         assertEquals(ItemStatus.OK, item.status)

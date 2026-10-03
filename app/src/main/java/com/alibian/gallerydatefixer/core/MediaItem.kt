@@ -18,6 +18,8 @@ data class ScanOptions(
     val preferFilename: Boolean = false,
     /** Write EXIF DateTimeOriginal into JPEG / PNG / WebP files that lack it. */
     val writeExif: Boolean = true,
+    /** Dates before this year (from any source) are ignored as implausible. 0 = no limit. */
+    val minYear: Int = 0,
 )
 
 data class MediaItem(
@@ -31,15 +33,30 @@ data class MediaItem(
     val embeddedDate: Long?,
     /** Date derived from the file name, if any. */
     val nameDate: Long?,
-    /** True when the file name only contained a day, so the time of [nameDate] is a guess. */
-    val nameDateIsDayOnly: Boolean,
+    /** How the file-name date was read (full date & time, Unix timestamp, or day only). */
+    val nameKind: FilenameDate.Kind?,
     val canWriteExif: Boolean,
     val writeExifEnabled: Boolean,
     /** Which of the candidate dates is used. */
     val source: DateSource,
     /** Unticked by the user in the preview: left untouched by "Fix". */
     val selected: Boolean = true,
+    /** Candidate dates that were found but rejected (before the minimum year): label to date. */
+    val ignoredDates: List<Pair<String, Long>> = emptyList(),
 ) {
+    /** True when the file name only contained a day, so the time of [nameDate] is a guess. */
+    val nameDateIsDayOnly: Boolean get() = nameKind == FilenameDate.Kind.DAY_ONLY
+
+    val nameLabel: String
+        get() = when (nameKind) {
+            FilenameDate.Kind.TIMESTAMP -> "File name (number read as timestamp)"
+            FilenameDate.Kind.DAY_ONLY -> "File name (day only, time estimated)"
+            else -> "File name"
+        }
+
+    /** Human readable description of where the new date comes from. */
+    val sourceLabel: String get() = if (source == DateSource.FILENAME) nameLabel else source.label
+
     val embeddedSource: DateSource get() = if (isVideo) DateSource.VIDEO_METADATA else DateSource.EXIF
 
     /** The date the file should have, or null when none could be determined. */

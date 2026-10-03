@@ -59,7 +59,34 @@ class FilenameDateParserTest {
         assertEquals(1684080930000L, ms.epochMillis)
         assertFalse(ms.dateOnly)
         assertEquals(1684080930000L, parser.parse("received_1684080930.jpeg")!!.epochMillis)
-        assertEquals(1684080930000L, parser.parse("1684080930.jpg")!!.epochMillis)
+        assertEquals(1684080930000L, parser.parse("1684080930000.jpg")!!.epochMillis)
+        assertEquals(1684080930000L, parser.parse("mmexport1684080930000.jpg")!!.epochMillis)
+        assertEquals(1684080930000L, parser.parse("FB_IMG_1684080930000 (1).jpg")!!.epochMillis)
+        assertEquals(FilenameDate.Kind.TIMESTAMP, parser.parse("FB_IMG_1684080930000.jpg")!!.kind)
+    }
+
+    /** Regression: random IDs in new files were read as timestamps from 2006 / 2009. */
+    @Test fun randomIdsDoNotBecomeOldDates() {
+        listOf(
+            "image_1234567890.jpg",
+            "IMG_1157893422.jpg",
+            "photo_1166002233.jpg",
+            "Messenger_creation_1157893422115.jpeg",
+            "inbound1234567890123.jpg",
+            "1000012345.jpg", // Android photo picker copy
+            "1684080930.jpg", // bare 10-digit number: too often an ID
+            "1243567812345.jpg", // 13 digits but 2009 – before 2010, not trusted
+            "download_1684080930000.jpg", // unknown prefix
+            "1684080930000_abcdefghijk.jpg", // suffix too long to be a copy marker
+        ).forEach { assertNull(it, parser.parse(it)) }
+    }
+
+    @Test fun hashesAndUuidsAreIgnored() {
+        assertNull(parser.parse("3f2a20090315b7c4e1d2a9f0c6b5e4d3.jpg"))
+        assertNull(parser.parse("e2009061-5b1c-4d2a-9f0c-200903151234.jpg"))
+        assertNull(parser.parse("a20090315.jpg")) // day glued to letters
+        // Real dates next to a hash still work.
+        assertParsed("IMG_20230514_181530_3f2a9b7c4e1d2a9f0c6b.jpg", LocalDateTime.of(2023, 5, 14, 18, 15, 30))
     }
 
     @Test fun randomIdsAreNotTimestamps() {

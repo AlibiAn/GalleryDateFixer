@@ -5,6 +5,7 @@ import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
+import java.time.LocalDate
 import java.time.ZoneId
 
 /** Walks a folder, and works out for every photo / video which date it should carry. */
@@ -50,8 +51,16 @@ class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
     private fun analyze(root: File, file: File, options: ScanOptions): MediaItem {
         val isVideo = MediaTypes.isVideo(file)
         val current = file.lastModified()
-        val embedded = if (isVideo) readVideoDate(file) else readExifDate(file)
-        val fromName = filenameParser.parse(file.name)
+        var embedded = if (isVideo) readVideoDate(file) else readExifDate(file)
+        var fromName = filenameParser.parse(file.name)
+
+        // Drop candidates older than the user's limit (e.g. a downloaded picture whose EXIF still
+        // carries the original 2009 camera date), but remember them so the preview can show why.
+        val ignored = mutableListOf<Pair<String, Long>>()
+        val minMillis = minMillis(options.minYear)
+        embedded?.let { if (it < minMillis) { ignored += (if (isVideo) "Video metadata" else "EXIF") to it; embedded = null } }
+        fromName?.let { if (it.epochMillis < minMillis) { ignored += "File name" to it.epochMillis; fromName = null } }
+
         val choice = chooser.choose(isVideo, current, embedded, fromName, options.preferFilename)
 
         return MediaItem(
@@ -62,12 +71,17 @@ class MediaScanner(private val zone: ZoneId = ZoneId.systemDefault()) {
             currentModified = current,
             embeddedDate = embedded,
             nameDate = choice.nameDate,
-            nameDateIsDayOnly = fromName?.dateOnly == true,
+            nameKind = fromName?.kind,
             canWriteExif = MediaTypes.canWriteExif(file),
             writeExifEnabled = options.writeExif,
             source = choice.source,
+            ignoredDates = ignored,
         )
     }
+
+    private fun minMillis(minYear: Int): Long =
+        if (minYear <= 0) Long.MIN_VALUE
+        else LocalDate.of(minYear, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
 
     private fun readExifDate(file: File): Long? = try {
         val exif = ExifInterface(file)
